@@ -11,25 +11,28 @@ ini_set('session.gc_maxlifetime', 2000000);
 // each client should remember their session id for EXACTLY 1 hour
 session_set_cookie_params(2000000);
 session_start();
+
+$link = mysqli_connect("mysql01.nhl-data.dk", "scandinavianscou", "DHhoddg04!","scandinavianscouting_dk_www2") or die ("cannot connect to mysql\n");
+
 if (!isset($_SESSION['login'])) {
-	if (isset($_GET['username'])) {
-		if ($_GET['username'] == "bjarne" && $_GET['password'] == "Fuzzball333")
-			$_SESSION['login'] = $_GET['username'];
-		else if ($_GET['username'] == "mikkel" && $_GET['password'] == "Skinkejeff9")
-			$_SESSION['login'] = $_GET['username'];
-		else {
-			echo "Forkert brugernavn / password<br><a href=index.php>Prøv igen</a>";die();}
-	}
-	else {
-	?>
-<form action=index.php>
-	Brugernavn:<br><input type=text name=username>
-	<br>Password:<br><input type=password name=password>
-	<br><input type=submit>
-	</form>
-<?php
-		print_r($_GET);
-		die();
+	if (isset($_POST['username']) && isset($_POST['password']) && isset($_POST['organization'])) {
+		// Check credentials against database
+		$username = mysqli_real_escape_string($link, $_POST['username']);
+		$password = mysqli_real_escape_string($link, $_POST['password']);
+		$organization = mysqli_real_escape_string($link, $_POST['organization']);
+		
+		$query = "SELECT * FROM users WHERE username='$username' AND password='$password' AND organization='$organization' LIMIT 1";
+		$result = mysqli_query($link, $query);
+		
+		if ($result && mysqli_num_rows($result) > 0) {
+			$user = mysqli_fetch_assoc($result);
+			$_SESSION['login'] = $user['username'];
+			$_SESSION['organization'] = $user['organization'];
+			header("Location: index.php");
+			die();
+		} else {
+			$login_error = "Forkert brugernavn / password / organisation";
+		}
 	}
 }
 ?>
@@ -71,12 +74,69 @@ if (!isset($_SESSION['login'])) {
 	</style>
 
 </head>
+<body>
 <?php
 
-$link = mysqli_connect("mysql01.nhl-data.dk", "scandinavianscou", "DHhoddg04!","scandinavianscouting_dk_www2") or die ("cannot connect to mysql\n");
+if (!isset($_SESSION['login'])) {
+	?>
+	<style>
+		.login-container {
+			min-height: 100vh;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+		}
+		.login-card {
+			width: 100%;
+			max-width: 400px;
+		}
+	</style>
+	<div class="login-container">
+		<div class="container-fluid">
+			<div class="row">
+				<div class="col-12">
+					<div class="card login-card mx-auto">
+						<div class="card-header">
+							<h3 class="text-center mb-0">SCANDINAVIANSCOUTING</h3>
+							<p class="text-center text-muted mb-0">Login</p>
+						</div>
+						<div class="card-body">
+							<?php if (isset($login_error)) { ?>
+								<div class="alert alert-danger" role="alert">
+									<?php echo $login_error; ?>
+								</div>
+							<?php } ?>
+							<form action="index.php" method="post">
+								<div class="form-group">
+									<label for="organization">Organisation:</label>
+									<input type="text" class="form-control" id="organization" name="organization" required>
+								</div>
+								<div class="form-group">
+									<label for="username">Brugernavn:</label>
+									<input type="text" class="form-control" id="username" name="username" required>
+								</div>
+								<div class="form-group">
+									<label for="password">Password:</label>
+									<input type="password" class="form-control" id="password" name="password" required>
+								</div>
+								<div class="form-group text-center">
+									<button type="submit" class="btn btn-primary btn-block">Log ind</button>
+								</div>
+							</form>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+	</body>
+	</html>
+	<?php
+	die();
+}
 
 if (!isset($_GET['p'])) 
-	menu();
+	menu(false);
 else if ($_GET['p'] == "New player report" && !isset($_GET['id'])) // create brand new player
 	spillerrapport(null);
 else if ($_GET['p'] == "New player report" && isset($_GET['id'])) // update existing if id is specified
@@ -96,10 +156,16 @@ else if ($_GET['p'] == "Search Match reports")
 else if ($_GET['p'] == "SaveMatch") {
 	savereport($_GET,"matchreport");
 }
+else if ($_GET['p'] == "signout") {
+	session_destroy();
+	header("Location: index.php");
+	die();
+}
 else die("unhandled page '$_GET[p]'");
 
 function savereport($data,$table) {
 	$data['CreatedBy'] = $_SESSION['login'];
+	$data['organization'] = $_SESSION['organization'];
 	global $link;
 	$p = $data['p'];
 	unset ($data['p']);
@@ -120,7 +186,7 @@ function savereport($data,$table) {
 	}
 	if (intval($id) < 1) { // insert new
 		$sql = "insert into $table ($colnames) values ($values)";
-		echo $sql;
+		
 		mysqli_query($link,$sql) or die(mysqli_error($link));
 		echo "<font color=green><h1>New report saved</h1></font>";?>
 		 <input onclick="window.location.href='index.php'" type="button" class="btn btn-info" value="Tilbage til hovedmenu"><br><br>
@@ -145,7 +211,8 @@ function spillerrapport($id,$table = "spillerrapport") {
 	
 	global $link;
 	if (intval($id) > 0) {
-		$data = mysqli_fetch_assoc(mysqli_query($link,"select * from $table where id=$id limit 1")) or die(mysqli_error($link));
+		$organization = mysqli_real_escape_string($link, $_SESSION['organization']);
+		$data = mysqli_fetch_assoc(mysqli_query($link,"select * from $table where id=$id and organization='$organization' limit 1")) or die(mysqli_error($link));
 	}
 	else {
 		$data = array();
@@ -239,7 +306,8 @@ echo "<table class='table table-sm'><tr>	<form action=index.php method=GET><inpu
 		$i++;
 		$y++;
 	}
-	echo "</table>		<button id=gembutton type=\"submit\" class=\"btn btn-primary\">Gem</button></form>";
+	echo "</table>		<button id=gembutton type=\"submit\" class=\"btn btn-primary\">Gem</button>";
+	echo "&nbsp;<button id=cancelbutton type=\"button\" class=\"btn btn-secondary\" onclick=\"cancelReport()\">Annuller</button></form>";
 			menu(false);
 
 	print_report();
@@ -256,6 +324,7 @@ function print_report() {
     var printButton = document.getElementById("printpagebutton");
     var postButton = document.getElementById("menu");
 		var gemButton = document.getElementById("gembutton");
+		var cancelButton = document.getElementById("cancelbutton");
 
 
 
@@ -265,6 +334,7 @@ function print_report() {
     printButton.style.visibility = 'hidden';
     postButton.style.visibility = 'hidden';
 		gemButton.style.visibility = 'hidden';
+		if (cancelButton) cancelButton.style.visibility = 'hidden';
 
 	
     //Print the page content
@@ -274,9 +344,16 @@ function print_report() {
     printButton.style.visibility = 'visible';
     postButton.style.visibility = 'visible';
 		gemButton.style.visibility = 'visible';
+		if (cancelButton) cancelButton.style.visibility = 'visible';
 
 
 
+	}
+
+	function cancelReport() {
+		if (confirm("Er du sikker på at du vil annullere? Alle ugemte ændringer vil gå tabt.")) {
+			window.location.href = "index.php";
+		}
 	}</script>
 
 <input id="printpagebutton" class="btn btn-info" type="button" value="Print" onclick="printpage()"/>
@@ -287,7 +364,8 @@ function searchreport($table = "spillerrapport") {
 			$_GET['filter_Deleted'] = 0;
 	menu(false);
 	global $link;
-	$q = "select * from $table order by id desc";
+	$organization = mysqli_real_escape_string($link, $_SESSION['organization']);
+	$q = "select * from $table where organization='$organization' order by id desc";
 	$res = mysqli_query($link,$q) or die(mysqli_error($link));
 	$i = 0;
 	echo "<table class=\"table table-hover\"><form action=index.php><input type=hidden name=p value='$_GET[p]'>";
@@ -295,7 +373,7 @@ function searchreport($table = "spillerrapport") {
 		echo "<tr>";
 		if ($i == 0) {
 			foreach (array_keys($data) as $key) { 
-				if ($key != "id") echo "<td>$key</td>";
+				if ($key != "id" && $key != "organization") echo "<td>$key</td>";
 			}
 			echo "</tr><tr>";
 						foreach (array_keys($data) as $key) {
@@ -304,7 +382,7 @@ function searchreport($table = "spillerrapport") {
 										else
 											$fk = "";
 										
-										if ($key != "id") echo "<td><input class=\"form-control\" type=text name=filter_$key value=\"$fk\"></td>\n";
+										if ($key != "id" && $key != "organization") echo "<td><input class=\"form-control\" type=text name=filter_$key value=\"$fk\"></td>\n";
 						}
 		}
 		if (true) {
@@ -325,7 +403,7 @@ function searchreport($table = "spillerrapport") {
 				}
 				$vs = substr(strip_tags($val),0,25);
 				if ($table == "spillerrapport") $editlink = "New player report"; else if ($table == "matchreport") $editlink = "New Match report";
-				if ($key != "id") $o .= "<td><a href=\"index.php?p=$editlink&id=$data[id]\">". ($vs) . "</a></td>\n";
+				if ($key != "id" && $key != "organization") $o .= "<td><a href=\"index.php?p=$editlink&id=$data[id]\">". ($vs) . "</a></td>\n";
 
 			}
 			if ($show)
@@ -340,6 +418,7 @@ function searchreport($table = "spillerrapport") {
 function menu($vertical = true) {
 	echo "<div id=menu><center>";
 	echo "<h3>Menu</h3>";
+	echo "<p>Logged in as: " . $_SESSION['login'] . " (" . $_SESSION['organization'] . ")</p>";
 	$buttons = array("New Match report","New player report","Search playerreports","Search Match reports");
 	foreach ($buttons as $button) {
 	?>
@@ -349,6 +428,9 @@ function menu($vertical = true) {
 
 <?php if ($vertical) echo "<br><br>"; else echo "&nbsp;";
 	}
+	?>
+  <input onclick="window.location.href='index.php?p=signout'" type="button" class="btn btn-warning" value="Log ud">
+<?php
 	echo "<br></center></div>";
 }
 ?>
